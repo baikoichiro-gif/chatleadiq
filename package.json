@@ -1,0 +1,29 @@
+{
+  "name": "chatleadiq",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source, consent-aware AI lead scoring CRM for WhatsApp sales conversations.",
+  "license": "MIT",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "format": "prettier --write .",
+    "db:generate": "pnpm --filter api prisma generate",
+    "db:migrate": "pnpm --filter api prisma migrate dev",
+    "db:push": "pnpm --filter api prisma db push",
+    "db:studio": "pnpm --filter api prisma studio",
+    "db:seed": "pnpm --filter api prisma db seed"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.15",
+    "prettier": "^3.3.3",
+    "turbo": "^2.0.9",
+    "typescript": "^5.5.4"
+  }
+}

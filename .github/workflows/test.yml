@@ -1,0 +1,44 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_DATABASE: chatleadiq_test
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+        env:
+          DATABASE_URL: mysql://root:root@127.0.0.1:3306/chatleadiq_test
+      - run: pnpm lint
+        env:
+          DATABASE_URL: mysql://root:root@127.0.0.1:3306/chatleadiq_test
+      - run: pnpm test
+        env:
+          DATABASE_URL: mysql://root:root@127.0.0.1:3306/chatleadiq_test
+      - run: pnpm build
+        env:
+          DATABASE_URL: mysql://root:root@127.0.0.1:3306/chatleadiq_test

@@ -1,0 +1,17 @@
+node_modules/
+.next/
+dist/
+coverage/
+.turbo/
+.env
+.env.*
+!.env.example
+data/
+baileys-auth/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.tsbuildinfo
+apps/api/prisma/migrations/dev.db
+generated/

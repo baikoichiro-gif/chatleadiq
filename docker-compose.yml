@@ -1,0 +1,47 @@
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_DATABASE: chatleadiq
+      MYSQL_USER: chatleadiq
+      MYSQL_PASSWORD: chatleadiq_password
+      MYSQL_ROOT_PASSWORD: root_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    depends_on:
+      - mysql
+    environment:
+      NODE_ENV: production
+      APP_URL: http://localhost:3000
+      API_PORT: 4000
+      DATABASE_URL: mysql://chatleadiq:chatleadiq_password@mysql:3306/chatleadiq
+      JWT_SECRET: change-this-secret
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: change-this-password
+      BAILEYS_AUTH_DIR: ./data/baileys-auth
+      ENABLE_AUTO_SEND: "false"
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./data:/app/data
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports:
+      - "3000:3000"
+
+volumes:
+  mysql_data:

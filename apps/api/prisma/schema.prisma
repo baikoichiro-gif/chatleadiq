@@ -1,0 +1,228 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model AdminUser {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(ADMIN)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model UserSetting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String   @db.LongText
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model WhatsAppSession {
+  id              Int                   @id @default(autoincrement())
+  name            String
+  status          WhatsAppSessionStatus @default(DISCONNECTED)
+  phoneNumber     String?
+  sessionPath     String
+  lastConnectedAt DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+}
+
+model Contact {
+  id            Int           @id @default(autoincrement())
+  waJid         String        @unique
+  name          String?
+  pushName      String?
+  phone         String?
+  isBusiness    Boolean?
+  consentStatus ConsentStatus @default(UNKNOWN)
+  doNotContact  Boolean       @default(false)
+  tagsJson      String        @db.LongText
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  chats         Chat[]
+  messages      Message[]
+  leads         Lead[]
+
+  @@index([waJid])
+}
+
+model Chat {
+  id            Int              @id @default(autoincrement())
+  waChatId      String           @unique
+  contactId     Int
+  name          String?
+  lastMessageAt DateTime?
+  unreadCount   Int              @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  contact       Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messages      Message[]
+  lead          Lead?
+  analyses      AnalysisResult[]
+
+  @@index([waChatId])
+}
+
+model Message {
+  id          Int              @id @default(autoincrement())
+  waMessageId String           @unique
+  chatId      Int
+  contactId   Int?
+  direction   MessageDirection
+  senderName  String?
+  text        String           @db.LongText
+  messageType String
+  timestamp   DateTime
+  isFromMe    Boolean
+  rawJson     String?          @db.LongText
+  createdAt   DateTime         @default(now())
+  chat        Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  contact     Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([waMessageId])
+  @@index([timestamp])
+}
+
+model Lead {
+  id                 Int              @id @default(autoincrement())
+  contactId          Int
+  chatId             Int              @unique
+  status             LeadStatus       @default(COLD)
+  overallScore       Int              @default(0)
+  interestScore      Int              @default(0)
+  buyingIntentScore  Int              @default(0)
+  urgencyScore       Int              @default(0)
+  budgetFitScore     Int              @default(0)
+  productMatchScore  Int              @default(0)
+  sentimentScore     Int              @default(0)
+  replyPriorityScore Int              @default(0)
+  spamRiskScore      Int              @default(0)
+  decisionStage      String           @default("inquiry")
+  productInterestJson String          @db.LongText
+  objectionsJson     String           @db.LongText
+  nextBestAction     String           @db.LongText
+  followUpTiming     String
+  followUpAt         DateTime?
+  summary            String           @db.LongText
+  lastAnalyzedAt     DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  contact            Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  chat               Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  analyses           AnalysisResult[]
+  suggestedReplies   SuggestedReply[]
+  followUpTasks      FollowUpTask[]
+
+  @@index([status])
+  @@index([overallScore])
+  @@index([followUpAt])
+}
+
+model AnalysisResult {
+  id         Int            @id @default(autoincrement())
+  leadId     Int
+  chatId     Int
+  engine     AnalysisEngine @default(RULE_BASED)
+  inputHash  String
+  resultJson String         @db.LongText
+  createdAt  DateTime       @default(now())
+  lead       Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  chat       Chat           @relation(fields: [chatId], references: [id], onDelete: Cascade)
+}
+
+model SuggestedReply {
+  id        Int                  @id @default(autoincrement())
+  leadId    Int
+  text      String               @db.LongText
+  status    SuggestedReplyStatus @default(DRAFT)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  lead      Lead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+model FollowUpTask {
+  id          Int                @id @default(autoincrement())
+  leadId      Int
+  title       String
+  description String?
+  status      FollowUpTaskStatus @default(PENDING)
+  dueAt       DateTime
+  completedAt DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  lead         Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id           Int      @id @default(autoincrement())
+  action       String
+  entityType   String
+  entityId     Int
+  metadataJson String   @db.LongText
+  createdAt    DateTime @default(now())
+}
+
+enum Role {
+  ADMIN
+  SALES
+}
+
+enum WhatsAppSessionStatus {
+  DISCONNECTED
+  QR_REQUIRED
+  CONNECTING
+  CONNECTED
+  ERROR
+}
+
+enum ConsentStatus {
+  UNKNOWN
+  OPTED_IN
+  OPTED_OUT
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum LeadStatus {
+  HOT_NOW
+  FOLLOW_UP_TODAY
+  FOLLOW_UP_TOMORROW
+  NURTURE
+  PRICE_OBJECTION
+  WAITING_CUSTOMER
+  DO_NOT_CONTACT_YET
+  COLD
+  WON
+  LOST
+}
+
+enum AnalysisEngine {
+  RULE_BASED
+  AI_ASSISTED
+}
+
+enum SuggestedReplyStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+  SENT_MANUALLY
+}
+
+enum FollowUpTaskStatus {
+  PENDING
+  DONE
+  CANCELLED
+  OVERDUE
+}
