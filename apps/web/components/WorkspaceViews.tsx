@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
+import { getCustomerName, getCustomerNumber } from "../lib/contactDisplay";
 import { pipelineColumns, sampleLeads } from "../lib/sample";
 import { ConsentWarning, EmptyState, LeadStatusBadge, RiskNote, ScoreBar, StatCard } from "./ui";
 
@@ -27,7 +28,7 @@ export function PipelineView() {
             .map((lead) => (
               <article className="leadCard" key={lead.id}>
                 <LeadStatusBadge status={lead.status} />
-                <strong>{lead.contact?.pushName ?? "Unknown"}</strong>
+                <strong>{getCustomerNumber(lead.contact)}</strong>
                 <p>{lead.nextBestAction}</p>
                 <span>{lead.overallScore} score</span>
               </article>
@@ -59,7 +60,7 @@ export function FollowupsView() {
             <article className="queueItem" key={task.id}>
               <div>
                 <strong>{task.title}</strong>
-                <small>{task.lead?.contact?.pushName ?? "Lead"} · {new Date(task.dueAt).toLocaleString()}</small>
+                <small>{getCustomerNumber(task.lead?.contact)} · {new Date(task.dueAt).toLocaleString()}</small>
               </div>
               <button className="mini">Done</button>
             </article>
@@ -161,8 +162,8 @@ export function LeadDetailView({ id }: { id: string }) {
       <section className="panel">
         <div className="sectionHeader">
           <div>
-            <h2>{lead.contact?.pushName ?? "Unknown lead"}</h2>
-            <p>{lead.contact?.phone ?? "No phone"}</p>
+            <h2>{getCustomerNumber(lead.contact)}</h2>
+            <p>{getCustomerName(lead.contact) ?? "No saved name"}</p>
           </div>
           <LeadStatusBadge status={lead.status} />
         </div>

@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { io } from "socket.io-client";
 import { API_URL, apiFetch } from "../lib/api";
+import { getCustomerName, getCustomerNumber } from "../lib/contactDisplay";
 import { sampleChats, sampleLeads } from "../lib/sample";
 import { ConsentWarning, LeadStatusBadge, ScoreBar, StatCard } from "./ui";
 
 type Lead = (typeof sampleLeads)[number];
-type Chat = (typeof sampleChats)[number];
+type Chat = (typeof sampleChats)[number] & { waChatId?: string | null };
 
 export function DashboardClient() {
   const [leads, setLeads] = useState<Lead[]>(sampleLeads);
@@ -73,12 +74,12 @@ export function DashboardClient() {
               {chats.map((chat) => (
                 <tr key={chat.id}>
                   <td>
-                    <strong>{chat.contact?.pushName ?? chat.name ?? "Unknown"}</strong>
+                    <strong>{getCustomerNumber(chat.contact, chat.waChatId)}</strong>
                     <small>{chat.messages?.[0]?.text ?? "No messages yet"}</small>
                   </td>
                   <td>{chat.lead?.nextBestAction ?? "analyze"}</td>
                   <td>
-                    <LeadStatusBadge status={chat.lead?.status ?? "COLD"} />
+                    {chat.lead ? <LeadStatusBadge status={chat.lead.status} /> : <span className="muted">Pending analysis</span>}
                   </td>
                   <td>{chat.lead?.overallScore ?? 0}</td>
                 </tr>
@@ -138,12 +139,12 @@ export function ChatsClient() {
           {filtered.map((chat) => (
             <tr key={chat.id}>
               <td>
-                <strong>{chat.contact?.pushName ?? chat.name}</strong>
-                <small>{chat.contact?.phone}</small>
+                <strong>{getCustomerNumber(chat.contact, chat.waChatId)}</strong>
+                <small>{getCustomerName(chat.contact, chat.name) ?? "No saved name"}</small>
               </td>
               <td>{chat.messages?.[0]?.text ?? "No message"}</td>
               <td>
-                <LeadStatusBadge status={chat.lead?.status ?? "COLD"} />
+                {chat.lead ? <LeadStatusBadge status={chat.lead.status} /> : <span className="muted">Pending analysis</span>}
               </td>
               <td>
                 <button className="mini" onClick={() => analyze(chat.id)}>
@@ -197,8 +198,8 @@ export function LeadsClient() {
           {filtered.map((lead) => (
             <tr key={lead.id}>
               <td>
-                <Link href={`/leads/${lead.id}`}>{lead.contact?.pushName ?? "Unknown"}</Link>
-                <small>{lead.contact?.phone}</small>
+                <Link href={`/leads/${lead.id}`}>{getCustomerNumber(lead.contact)}</Link>
+                <small>{getCustomerName(lead.contact) ?? "No saved name"}</small>
               </td>
               <td>
                 <LeadStatusBadge status={lead.status} />

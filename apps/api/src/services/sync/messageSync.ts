@@ -57,17 +57,18 @@ export async function saveBaileysMessage(rawMessage: BaileysMessage, io?: Server
 
   const { text, messageType } = extractText(rawMessage.message);
   const isFromMe = Boolean(rawMessage.key?.fromMe);
+  const customerPushName = isFromMe ? undefined : rawMessage.pushName;
   const timestamp = timestampToDate(rawMessage.messageTimestamp);
 
   const contact = await prisma.contact.upsert({
     where: { waJid: remoteJid },
     update: {
-      pushName: rawMessage.pushName ?? undefined,
+      pushName: customerPushName ?? undefined,
       phone: normalizePhone(remoteJid) ?? undefined
     },
     create: {
       waJid: remoteJid,
-      pushName: rawMessage.pushName,
+      pushName: customerPushName,
       phone: normalizePhone(remoteJid),
       tagsJson: "[]"
     }
@@ -77,13 +78,14 @@ export async function saveBaileysMessage(rawMessage: BaileysMessage, io?: Server
     where: { waChatId: remoteJid },
     update: {
       contactId: contact.id,
+      name: customerPushName ?? undefined,
       lastMessageAt: timestamp,
       unreadCount: isFromMe || options.countUnread === false ? undefined : { increment: 1 }
     },
     create: {
       waChatId: remoteJid,
       contactId: contact.id,
-      name: rawMessage.pushName,
+      name: customerPushName,
       lastMessageAt: timestamp,
       unreadCount: isFromMe ? 0 : 1
     }
@@ -97,7 +99,7 @@ export async function saveBaileysMessage(rawMessage: BaileysMessage, io?: Server
       chatId: chat.id,
       contactId: contact.id,
       direction: isFromMe ? "OUTBOUND" : "INBOUND",
-      senderName: rawMessage.pushName,
+      senderName: customerPushName,
       text,
       messageType,
       timestamp,

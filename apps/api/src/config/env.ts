@@ -24,7 +24,7 @@ const schema = z.object({
   OPENAI_API_KEY: z.string().optional().default(""),
   GEMINI_API_KEY: z.string().optional().default(""),
   ENABLE_AI_ANALYZER: z.coerce.boolean().default(true),
-  AI_ANALYZER_REQUIRED: z.coerce.boolean().default(false),
+  AI_ANALYZER_REQUIRED: z.coerce.boolean().default(true),
   AI_PROVIDER: z.enum(["openai", "gemini", "auto"]).default("auto"),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
   GEMINI_MODEL: z.string().default("gemini-1.5-flash"),

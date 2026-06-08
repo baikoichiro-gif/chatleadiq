@@ -26,9 +26,17 @@ export type AiAnalyzerContext = {
 
 export const CHATLEADIQ_SYSTEM_PROMPT = `You are ChatLeadIQ, a consent-aware AI CRM analyst for WhatsApp sales conversations and understand every language in the world.
 
-You are the primary analysis engine. Read the WhatsApp chat history yourself, infer customer intent from context, score every metric, detect products/prices/objections/signals, choose lead status, recommend follow-up timing, summarize the opportunity, and draft a human-approved reply.
+You are the only primary analysis engine. Read the entire WhatsApp chat history yourself like a senior sales analyst. Infer the customer's current state from the full conversation timeline, not from keyword matching. Understand short informal messages, Indonesian slang, mixed language, missing punctuation, and context from previous sales/customer turns.
 
 Do not copy a rule result. Do not assume another engine already scored the lead. Your output must be your own analysis of the chat history and contact metadata.
+
+Your reasoning task:
+- Reconstruct the conversation timeline.
+- Identify what the customer wanted, what the sales side offered, and what changed over time.
+- Pay most attention to the latest meaningful customer state, but do not ignore earlier context.
+- Decide whether the customer is only asking, negotiating, waiting, has paid, has opted out, or has already completed the deal.
+- Choose exactly one lead status from the allowed statuses based on semantic context.
+- Produce scores and recommendations that match your chosen status.
 
 Score each metric from 0 to 100:
 - interestScore: customer curiosity, product fit questions, repeated engagement.
@@ -50,8 +58,50 @@ Rules:
 - Suggested replies must be polite, short, and natural.
 - Do not hallucinate products, prices, locations, or promises not found in the chat.
 - If uncertain, say uncertain.
-- Return only valid JSON.
+- Return only one valid JSON object that exactly matches the required output template.
+- Do not return prose, markdown, explanation, or stringified nested objects.
 - Use the same language as the customer when possible.`;
+
+const outputTemplate = {
+  leadStatus: "HOT_NOW | FOLLOW_UP_TODAY | FOLLOW_UP_TOMORROW | NURTURE | PRICE_OBJECTION | WAITING_CUSTOMER | DO_NOT_CONTACT_YET | COLD | WON | LOST",
+  overallScore: 0,
+  scores: {
+    interestScore: 0,
+    buyingIntentScore: 0,
+    urgencyScore: 0,
+    budgetFitScore: 0,
+    productMatchScore: 0,
+    sentimentScore: 0,
+    replyPriorityScore: 0,
+    spamRiskScore: 0
+  },
+  detected: {
+    products: [],
+    prices: [],
+    locations: [],
+    quantities: [],
+    timeSignals: [],
+    objections: [],
+    buyingSignals: [],
+    negativeSignals: [],
+    optOutSignals: [],
+    decisionMakers: []
+  },
+  decisionStage: "string",
+  recommendation: {
+    nextBestAction: "string",
+    followUpTiming: "now | today | tomorrow | three_days | wait_customer_reply | do_not_contact | no_follow_up",
+    reason: "string",
+    doNotContactReason: null,
+    suggestedReply: "string"
+  },
+  summary: {
+    shortSummary: "string",
+    customerNeed: "string",
+    salesOpportunity: "string",
+    risk: "string"
+  }
+};
 
 export function hashAnalysisInput(messages: AnalyzerMessage[], context?: AiAnalyzerContext) {
   return crypto.createHash("sha256").update(JSON.stringify({ messages, context })).digest("hex");
@@ -74,6 +124,18 @@ export function buildAiAnalysisInput(messages: AnalyzerMessage[], context: AiAna
       "WON",
       "LOST"
     ],
+    leadStatusDefinitions: {
+      HOT_NOW: "Customer has strong immediate buying intent but the deal is not completed yet. Examples include asking for invoice/payment details, delivery, address, PO, or urgent purchase next steps.",
+      FOLLOW_UP_TODAY: "Customer is interested and should be followed up today, but has not committed or paid.",
+      FOLLOW_UP_TOMORROW: "Customer likely needs time, approval, or a light follow-up tomorrow.",
+      NURTURE: "Customer is exploring or early-stage and needs education or low-pressure nurturing.",
+      PRICE_OBJECTION: "Customer is blocked or negotiating mainly on price/value.",
+      WAITING_CUSTOMER: "Sales has replied or asked something and the next meaningful action belongs to the customer.",
+      DO_NOT_CONTACT_YET: "Customer opted out, showed negative intent, or contact would be spammy/unsafe.",
+      COLD: "No meaningful buying signal or useful context exists yet.",
+      WON: "The customer has completed or clearly confirmed the transaction/deal, such as paid, sent money/proof, confirmed purchase completion, or sales is processing the order after agreement.",
+      LOST: "The customer clearly cancelled, rejected, bought elsewhere, or the opportunity is over."
+    },
     scoreRubric: {
       interestScore: "0 no meaningful interest, 100 strong repeated product interest",
       buyingIntentScore: "0 no purchase intent, 100 order/payment/invoice/address/PO intent",
@@ -92,6 +154,7 @@ export function buildAiAnalysisInput(messages: AnalyzerMessage[], context: AiAna
       ifLastMessageFromSales: "Prefer WAITING_CUSTOMER unless there is a clear agreed follow-up date.",
       ifOptOutDetected: "Set DO_NOT_CONTACT_YET, spamRiskScore high, suggestedReply empty."
     },
+    outputTemplate,
     context,
     chatHistory: messages.map((message, index) => ({
       order: index + 1,
@@ -100,8 +163,10 @@ export function buildAiAnalysisInput(messages: AnalyzerMessage[], context: AiAna
       text: message.text,
       timestamp: message.timestamp.toISOString()
     })),
-    outputContract:
-      "Return only JSON matching the LeadAnalysisResult schema. Every score must be 0-100. Suggested reply must be a draft only and require human approval."
+    outputContract: {
+      format: "Return exactly one JSON object. Every nested field in outputTemplate is required. Arrays must be arrays. recommendation and summary must be objects, not strings. Scores must be numbers from 0 to 100.",
+      template: outputTemplate
+    }
   };
 }
 
@@ -116,12 +181,50 @@ export async function analyzeWithAI(messages: AnalyzerMessage[], context: AiAnal
   try {
     const input = buildAiAnalysisInput(messages, context);
     const content = await callConfiguredProvider(input);
-    const parsed = leadAnalysisSchema.parse(JSON.parse(content));
+    const parsed = await parseOrRepairAiResult(content, input);
     return { engine: "AI_ASSISTED" as const, result: enforceSafetyGuardrails(parsed, messages, context) };
   } catch (error) {
     logger.warn({ error }, "AI analyzer failed");
     throw error;
   }
+}
+
+async function parseOrRepairAiResult(content: string, originalInput: unknown) {
+  const first = parseAiResult(content);
+  if (first.ok) return first.data;
+
+  logger.warn({ issues: first.issues }, "AI analyzer returned invalid JSON shape, requesting repair");
+  const repairedContent = await callConfiguredProvider({
+    task: "Repair your previous ChatLeadIQ analyzer output. Return only one valid JSON object matching the required template. Do not change the analysis unless needed to satisfy the schema.",
+    validationIssues: first.issues,
+    invalidOutput: content.slice(0, 8000),
+    requiredOutputTemplate: outputTemplate,
+    originalInput
+  });
+  const repaired = parseAiResult(repairedContent);
+  if (repaired.ok) return repaired.data;
+
+  throw new Error(`AI analyzer returned invalid JSON after repair: ${JSON.stringify(repaired.issues)}`);
+}
+
+function parseAiResult(content: string): { ok: true; data: LeadAnalysisResult } | { ok: false; issues: unknown } {
+  try {
+    const parsedJson = JSON.parse(extractJsonObject(content));
+    const parsed = leadAnalysisSchema.safeParse(parsedJson);
+    if (parsed.success) return { ok: true, data: parsed.data };
+    return { ok: false, issues: parsed.error.issues };
+  } catch (error) {
+    return { ok: false, issues: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function extractJsonObject(content: string) {
+  const trimmed = content.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
+  const first = trimmed.indexOf("{");
+  const last = trimmed.lastIndexOf("}");
+  if (first >= 0 && last > first) return trimmed.slice(first, last + 1);
+  return trimmed;
 }
 
 function hasConfiguredProvider() {

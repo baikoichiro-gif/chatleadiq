@@ -100,7 +100,7 @@ See `.env.example` for all variables. Important values:
 - `OPENAI_API_KEY`: optional.
 - `GEMINI_API_KEY`: optional.
 - `ENABLE_AI_ANALYZER`: AI enhancement toggle.
-- `AI_ANALYZER_REQUIRED`: when true, analysis fails if no AI provider is available.
+- `AI_ANALYZER_REQUIRED`: keep `true` when status/scoring must come from AI reasoning, not rule fallback.
 - `AI_PROVIDER`: `auto`, `openai`, or `gemini`.
 - `OPENAI_MODEL` / `GEMINI_MODEL`: model selection.
 - `ANALYSIS_DEBOUNCE_MS`: delay before analyzing a chat after new messages arrive.
