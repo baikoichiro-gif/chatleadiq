@@ -19,8 +19,6 @@ It is designed for ethical sales assistance, not automation abuse.
 
 ## Screenshots
 
-> Add real screenshots before submitting to OSS programs.
-
 ![ChatLeadIQ Dashboard](docs/assets/hero-dashboard.png)
 ![Lead Pipeline](docs/assets/lead-pipeline.png)
 ![WhatsApp Connect](docs/assets/whatsapp-connect.png)
