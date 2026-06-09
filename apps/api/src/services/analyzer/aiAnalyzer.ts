@@ -37,6 +37,9 @@ Your reasoning task:
 - Decide whether the customer is only asking, negotiating, waiting, has paid, has opted out, or has already completed the deal.
 - Choose exactly one lead status from the allowed statuses based on semantic context.
 - Produce scores and recommendations that match your chosen status.
+- Decide the follow-up task yourself from the chat timeline. Do not rely on keyword rules or a fixed local schedule.
+- If a follow-up is needed, set followUpTask.shouldCreate true and provide a concrete dueAtIso after currentTimeIso.
+- If the best action is to wait for the customer, stop contacting, deal is won/lost, or no useful follow-up exists, set followUpTask.shouldCreate false and dueAtIso null.
 
 Score each metric from 0 to 100:
 - interestScore: customer curiosity, product fit questions, repeated engagement.
@@ -95,6 +98,15 @@ const outputTemplate = {
     doNotContactReason: null,
     suggestedReply: "string"
   },
+  followUpTask: {
+    shouldCreate: false,
+    title: "string",
+    description: "string",
+    dueAtIso: null,
+    priority: "high | medium | low | none",
+    humanApprovalRequired: true,
+    reason: "string"
+  },
   summary: {
     shortSummary: "string",
     customerNeed: "string",
@@ -152,7 +164,20 @@ export function buildAiAnalysisInput(messages: AnalyzerMessage[], context: AiAna
       respectOptOut: true,
       avoidAggressiveFollowup: true,
       ifLastMessageFromSales: "Prefer WAITING_CUSTOMER unless there is a clear agreed follow-up date.",
-      ifOptOutDetected: "Set DO_NOT_CONTACT_YET, spamRiskScore high, suggestedReply empty."
+      ifOptOutDetected: "Set DO_NOT_CONTACT_YET, spamRiskScore high, suggestedReply empty, and followUpTask.shouldCreate false."
+    },
+    followUpTaskRules: {
+      source: "The AI must infer follow-up need and timing from the conversation semantics, not from local keyword parameters.",
+      currentTimeIso: new Date().toISOString(),
+      dueAtIso: "Use an ISO-8601 datetime after currentTimeIso when shouldCreate is true. Use null when no follow-up should be created.",
+      humanApprovalRequired: "Always true. A task can remind a human, but the AI must not send messages automatically.",
+      avoidTasksWhen: [
+        "customer opted out",
+        "deal is already won and no relationship-maintenance action is useful",
+        "lead is lost",
+        "last meaningful action belongs to the customer",
+        "no meaningful context exists"
+      ]
     },
     outputTemplate,
     context,
@@ -324,6 +349,15 @@ function enforceSafetyGuardrails(result: LeadAnalysisResult, messages: AnalyzerM
       followUpTiming: "do_not_contact",
       doNotContactReason: result.recommendation.doNotContactReason ?? "Customer opted out or asked not to be contacted.",
       suggestedReply: ""
+    },
+    followUpTask: {
+      shouldCreate: false,
+      title: "",
+      description: "",
+      dueAtIso: null,
+      priority: "none",
+      humanApprovalRequired: true,
+      reason: "Do-not-contact guardrail prevents follow-up task creation."
     },
     summary: {
       ...result.summary,

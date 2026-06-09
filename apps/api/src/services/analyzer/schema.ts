@@ -36,6 +36,15 @@ export const leadAnalysisSchema = z.object({
     doNotContactReason: z.string().nullable(),
     suggestedReply: z.string()
   }),
+  followUpTask: z.object({
+    shouldCreate: z.boolean(),
+    title: z.string(),
+    description: z.string(),
+    dueAtIso: z.string().datetime().nullable(),
+    priority: z.enum(["high", "medium", "low", "none"]),
+    humanApprovalRequired: z.boolean(),
+    reason: z.string()
+  }),
   summary: z.object({
     shortSummary: z.string(),
     customerNeed: z.string(),

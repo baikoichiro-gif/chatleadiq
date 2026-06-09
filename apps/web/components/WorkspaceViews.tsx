@@ -40,39 +40,208 @@ export function PipelineView() {
 }
 
 export function FollowupsView() {
-  const [tasks, setTasks] = useState<Array<{ id: number; title: string; dueAt: string; lead?: Lead }>>([]);
+  const [tasks, setTasks] = useState<FollowUpTask[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
   useEffect(() => {
-    apiFetch<{ tasks: Array<{ id: number; title: string; dueAt: string; lead?: Lead }> }>("/api/followups/today")
+    refreshFollowUps()
       .then((data) => setTasks(data.tasks))
       .catch(() =>
-        setTasks([
-          { id: 1, title: "Kirim invoice setelah approval", dueAt: new Date().toISOString(), lead: sampleLeads[0] },
-          { id: 2, title: "Follow-up ringan soal diskusi internal", dueAt: new Date(Date.now() + 86400000).toISOString(), lead: sampleLeads[1] }
-        ])
+        setTasks(buildSampleFollowUps())
       );
   }, []);
+
+  async function runAiFollowUpAnalysis() {
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await apiFetch<{ queuedChats: number }>("/api/analysis/backfill", { method: "POST", body: JSON.stringify({ limit: 100 }) });
+      setNotice(`${result.queuedChats} chats queued for AI follow-up analysis.`);
+      const next = await refreshFollowUps();
+      setTasks(next.tasks);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to queue AI analysis.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateTask(id: number, status: "DONE" | "CANCELLED") {
+    await apiFetch(`/api/followups/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+    const next = await refreshFollowUps();
+    setTasks(next.tasks);
+  }
+
+  const buckets = useMemo(() => bucketFollowUps(tasks), [tasks]);
+  const dueToday = buckets.overdue.length + buckets.today.length;
+
   return (
-    <div className="grid two">
-      <section className="panel">
-        <h2>Today Queue</h2>
-        <div className="queue">
-          {tasks.map((task) => (
-            <article className="queueItem" key={task.id}>
-              <div>
-                <strong>{task.title}</strong>
-                <small>{getCustomerNumber(task.lead?.contact)} · {new Date(task.dueAt).toLocaleString()}</small>
-              </div>
-              <button className="mini">Done</button>
-            </article>
-          ))}
+    <div className="stack">
+      <div className="statsGrid">
+        <StatCard label="AI Follow-ups" value={tasks.length} detail="pending tasks" />
+        <StatCard label="Due Today" value={dueToday} tone="yellow" detail="overdue + today" />
+        <StatCard label="Tomorrow" value={buckets.tomorrow.length} tone="green" detail="planned by AI" />
+        <StatCard label="Upcoming" value={buckets.upcoming.length} tone="purple" detail="future queue" />
+        <StatCard label="Draft-only" value="ON" tone="green" detail="human approval" />
+      </div>
+
+      <section className="panel followupControl">
+        <div>
+          <h2>AI Follow-up Queue</h2>
+          <p className="muted">Tasks are created from the AI analyzer reading full WhatsApp chat history. Replies remain draft-only.</p>
         </div>
+        <button className="primary" disabled={busy} onClick={runAiFollowUpAnalysis}>
+          {busy ? "Queueing..." : "Run AI Follow-up Analysis"}
+        </button>
+        {notice ? <span className="statusPill cyan">{notice}</span> : null}
       </section>
+
+      <div className="followupBoard">
+        <FollowupColumn title="Overdue" tasks={buckets.overdue} tone="risk" onUpdate={updateTask} />
+        <FollowupColumn title="Today" tasks={buckets.today} tone="warm" onUpdate={updateTask} />
+        <FollowupColumn title="Tomorrow" tasks={buckets.tomorrow} tone="good" onUpdate={updateTask} />
+        <FollowupColumn title="Upcoming" tasks={buckets.upcoming} tone="neutral" onUpdate={updateTask} />
+      </div>
+
       <section className="stack">
         <ConsentWarning />
         <RiskNote text="Do-not-contact leads are excluded from follow-up queues by default." />
       </section>
     </div>
   );
+}
+
+type FollowUpTask = {
+  id: number;
+  title: string;
+  description?: string | null;
+  dueAt: string;
+  status: string;
+  lead?: Lead & {
+    suggestedReplies?: Array<{ id: number; text: string; status: string }>;
+    analyses?: Array<{ id: number; engine: string; createdAt: string }>;
+  };
+};
+
+type FollowupsResponse = {
+  tasks: FollowUpTask[];
+};
+
+function FollowupColumn({
+  title,
+  tasks,
+  tone,
+  onUpdate
+}: {
+  title: string;
+  tasks: FollowUpTask[];
+  tone: "good" | "warm" | "risk" | "neutral";
+  onUpdate: (id: number, status: "DONE" | "CANCELLED") => Promise<void>;
+}) {
+  return (
+    <section className="followupColumn">
+      <div className="followupColumnHeader">
+        <h2>{title}</h2>
+        <span className={`leadBadge ${tone}`}>{tasks.length}</span>
+      </div>
+      {tasks.length ? (
+        tasks.map((task) => <FollowupCard key={task.id} task={task} onUpdate={onUpdate} />)
+      ) : (
+        <EmptyState title="No tasks" text="No AI follow-up is due in this bucket." />
+      )}
+    </section>
+  );
+}
+
+function FollowupCard({ task, onUpdate }: { task: FollowUpTask; onUpdate: (id: number, status: "DONE" | "CANCELLED") => Promise<void> }) {
+  const lead = task.lead;
+  const draft = lead?.suggestedReplies?.[0];
+  const analysis = lead?.analyses?.[0];
+  return (
+    <article className="followupCard">
+      <div className="followupCardTop">
+        {lead ? <LeadStatusBadge status={lead.status} /> : <span className="leadBadge neutral">PENDING</span>}
+        <span>{formatDue(task.dueAt)}</span>
+      </div>
+      <strong>{task.title}</strong>
+      <small>{getCustomerNumber(lead?.contact)}</small>
+      {task.description ? <p>{task.description}</p> : null}
+      {draft?.text ? (
+        <div className="draftPreview">
+          <span>Draft reply</span>
+          <p>{draft.text}</p>
+        </div>
+      ) : null}
+      <div className="followupMeta">
+        <span>{analysis?.engine ?? "AI pending"}</span>
+        <span>Human approval required</span>
+      </div>
+      <div className="buttonRow">
+        <button className="mini" onClick={() => onUpdate(task.id, "DONE")}>
+          Done
+        </button>
+        <button className="ghost" onClick={() => onUpdate(task.id, "CANCELLED")}>
+          Cancel
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function refreshFollowUps() {
+  return apiFetch<FollowupsResponse>("/api/followups");
+}
+
+function buildSampleFollowUps(): FollowUpTask[] {
+  return [
+    {
+      id: 1,
+      title: "Send invoice details after human review",
+      description: "AI reason: customer asked for invoice today.\nPriority: high\nHuman approval required before sending any reply.",
+      dueAt: new Date().toISOString(),
+      status: "PENDING",
+      lead: sampleLeads[0]
+    },
+    {
+      id: 2,
+      title: "Follow up price objection with value context",
+      description: "AI reason: customer compared price and needs reassurance.\nPriority: medium\nHuman approval required before sending any reply.",
+      dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      status: "PENDING",
+      lead: sampleLeads[1]
+    }
+  ];
+}
+
+function bucketFollowUps(tasks: FollowUpTask[]) {
+  const now = new Date();
+  const endOfToday = new Date(now);
+  endOfToday.setHours(23, 59, 59, 999);
+  const startOfTomorrow = new Date(endOfToday.getTime() + 1);
+  const endOfTomorrow = new Date(startOfTomorrow);
+  endOfTomorrow.setHours(23, 59, 59, 999);
+
+  return {
+    overdue: tasks.filter((task) => new Date(task.dueAt) < now),
+    today: tasks.filter((task) => {
+      const dueAt = new Date(task.dueAt);
+      return dueAt >= now && dueAt <= endOfToday;
+    }),
+    tomorrow: tasks.filter((task) => {
+      const dueAt = new Date(task.dueAt);
+      return dueAt >= startOfTomorrow && dueAt <= endOfTomorrow;
+    }),
+    upcoming: tasks.filter((task) => new Date(task.dueAt) > endOfTomorrow)
+  };
+}
+
+function formatDue(value: string) {
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 export function AnalyticsView() {

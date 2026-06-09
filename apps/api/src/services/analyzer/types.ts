@@ -53,6 +53,15 @@ export type LeadAnalysisResult = {
     doNotContactReason: string | null;
     suggestedReply: string;
   };
+  followUpTask: {
+    shouldCreate: boolean;
+    title: string;
+    description: string;
+    dueAtIso: string | null;
+    priority: "high" | "medium" | "low" | "none";
+    humanApprovalRequired: boolean;
+    reason: string;
+  };
   summary: {
     shortSummary: string;
     customerNeed: string;

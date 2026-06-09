@@ -178,6 +178,8 @@ export function analyzeWithRules(messages: AnalyzerMessage[], consentStatus = "U
   const prices = extractMatches(allText, /\b(?:rp\s?)?\d{2,3}(?:[.,]\d{3})+(?:,\d{2})?\b/gi);
   const quantities = extractMatches(allText, /\b\d+\s?(?:pcs|unit|buah|box|lusin)\b/gi);
   const timeSignals = extractMatches(allText, /\b(?:hari ini|besok|lusa|minggu depan|bulan ini|sekarang|nanti)\b/gi);
+  const fallbackFollowUpAt = buildFallbackFollowUpDate(followUpTiming);
+  const shouldCreateFollowUp = Boolean(fallbackFollowUpAt && !["DO_NOT_CONTACT_YET", "WAITING_CUSTOMER", "WON", "LOST", "COLD"].includes(leadStatus));
 
   return {
     leadStatus,
@@ -215,6 +217,15 @@ export function analyzeWithRules(messages: AnalyzerMessage[], consentStatus = "U
           ? ""
           : "Baik, terima kasih. Saya bantu rangkum opsinya dulu ya, nanti Bapak/Ibu bisa cek tanpa terburu-buru."
     },
+    followUpTask: {
+      shouldCreate: shouldCreateFollowUp,
+      title: shouldCreateFollowUp ? nextBestAction : "",
+      description: shouldCreateFollowUp ? reason : "",
+      dueAtIso: fallbackFollowUpAt?.toISOString() ?? null,
+      priority: shouldCreateFollowUp ? (leadStatus === "HOT_NOW" ? "high" : "medium") : "none",
+      humanApprovalRequired: true,
+      reason: shouldCreateFollowUp ? "Rule fallback created this only because AI fallback is enabled." : "No rule fallback follow-up task created."
+    },
     summary: {
       shortSummary: safeMessages.length ? "Percakapan dianalisa dari pesan terbaru yang tersimpan di MySQL." : "Belum ada pesan untuk dianalisa.",
       customerNeed: high.length || medium.length ? "Customer sedang mencari informasi produk atau transaksi." : "Kebutuhan customer belum jelas.",
@@ -222,4 +233,12 @@ export function analyzeWithRules(messages: AnalyzerMessage[], consentStatus = "U
       risk: doNotContactReason ?? (spamRiskScore > 60 ? "Risiko spam tinggi karena terlalu banyak pesan sales." : "Risiko rendah.")
     }
   };
+}
+
+function buildFallbackFollowUpDate(timing: string) {
+  const now = new Date();
+  if (["now", "today"].includes(timing)) return now;
+  if (timing === "tomorrow") return new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  if (timing === "three_days") return new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+  return null;
 }

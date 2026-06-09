@@ -5,8 +5,40 @@ import { prisma } from "../lib/prisma.js";
 
 export const followupsRouter = Router();
 
+const taskInclude = {
+  lead: {
+    include: {
+      contact: true,
+      chat: true,
+      suggestedReplies: { orderBy: { createdAt: "desc" as const }, take: 1 },
+      analyses: { orderBy: { createdAt: "desc" as const }, take: 1 }
+    }
+  }
+};
+
+followupsRouter.get(
+  "/",
+  asyncHandler(async (_req, res) => {
+    const tasks = await prisma.followUpTask.findMany({
+      where: { status: "PENDING" },
+      include: taskInclude,
+      orderBy: { dueAt: "asc" },
+      take: 200
+    });
+
+    res.json({
+      generatedBy: "AI_ANALYZER",
+      note: "Follow-up tasks are created from the AI analyzer followUpTask output and remain human-approved only.",
+      tasks,
+      buckets: bucketTasks(tasks)
+    });
+  })
+);
+
 followupsRouter.get("/today", asyncHandler(async (_req, res) => res.json({ tasks: await findTasks("today") })));
 followupsRouter.get("/overdue", asyncHandler(async (_req, res) => res.json({ tasks: await findTasks("overdue") })));
+followupsRouter.get("/tomorrow", asyncHandler(async (_req, res) => res.json({ tasks: await findTasks("tomorrow") })));
+followupsRouter.get("/upcoming", asyncHandler(async (_req, res) => res.json({ tasks: await findTasks("upcoming") })));
 
 followupsRouter.patch(
   "/:id",
@@ -20,16 +52,45 @@ followupsRouter.patch(
   })
 );
 
-async function findTasks(type: "today" | "overdue") {
+async function findTasks(type: "today" | "overdue" | "tomorrow" | "upcoming") {
   const now = new Date();
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
   const endOfToday = new Date(now);
   endOfToday.setHours(23, 59, 59, 999);
+  const startOfTomorrow = new Date(endOfToday.getTime() + 1);
+  const endOfTomorrow = new Date(startOfTomorrow);
+  endOfTomorrow.setHours(23, 59, 59, 999);
+
   return prisma.followUpTask.findMany({
     where: {
       status: "PENDING",
-      dueAt: type === "overdue" ? { lt: now } : { gte: now, lte: endOfToday }
+      dueAt:
+        type === "overdue"
+          ? { lt: now }
+          : type === "tomorrow"
+            ? { gte: startOfTomorrow, lte: endOfTomorrow }
+            : type === "upcoming"
+              ? { gt: endOfTomorrow }
+              : { gte: startOfToday, lte: endOfToday }
     },
-    include: { lead: { include: { contact: true, chat: true } } },
+    include: taskInclude,
     orderBy: { dueAt: "asc" }
   });
+}
+
+function bucketTasks<T extends { dueAt: Date }>(tasks: T[]) {
+  const now = new Date();
+  const endOfToday = new Date(now);
+  endOfToday.setHours(23, 59, 59, 999);
+  const startOfTomorrow = new Date(endOfToday.getTime() + 1);
+  const endOfTomorrow = new Date(startOfTomorrow);
+  endOfTomorrow.setHours(23, 59, 59, 999);
+
+  return {
+    overdue: tasks.filter((task) => task.dueAt < now),
+    today: tasks.filter((task) => task.dueAt >= now && task.dueAt <= endOfToday),
+    tomorrow: tasks.filter((task) => task.dueAt >= startOfTomorrow && task.dueAt <= endOfTomorrow),
+    upcoming: tasks.filter((task) => task.dueAt > endOfTomorrow)
+  };
 }
