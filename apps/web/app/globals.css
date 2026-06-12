@@ -290,6 +290,18 @@ button:disabled {
   grid-template-columns: minmax(270px, 0.78fr) minmax(0, 1.15fr) minmax(300px, 0.7fr);
 }
 
+.leadDetailBoard {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.2fr) minmax(280px, 0.9fr);
+}
+
+.leadDetailWide {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+}
+
 .statsGrid {
   display: grid;
   gap: 0.8rem;
@@ -665,6 +677,79 @@ select {
   margin: 1rem 0;
 }
 
+.insightGrid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.insightBlock,
+.signalGroup,
+.followupReason,
+.auditItem {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(145, 170, 199, 0.12);
+  border-radius: 8px;
+  padding: 0.82rem;
+}
+
+.insightBlock span,
+.signalGroup > span,
+.followupReason small,
+.auditItem span,
+.auditItem small {
+  color: var(--muted);
+  display: block;
+  font-size: 0.76rem;
+}
+
+.insightBlock p,
+.followupReason p {
+  line-height: 1.55;
+  margin: 0.35rem 0 0;
+}
+
+.signalGroup {
+  display: grid;
+  gap: 0.58rem;
+  margin-bottom: 0.72rem;
+}
+
+.signalGroup div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.signalGroup small {
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  border-radius: 999px;
+  color: #a5f3fc;
+  padding: 0.3rem 0.52rem;
+}
+
+.signalGroup em {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-style: normal;
+}
+
+.followupReason {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.auditList {
+  display: grid;
+  gap: 0.58rem;
+}
+
+.auditItem {
+  display: grid;
+  gap: 0.25rem;
+}
+
 .timeline {
   display: grid;
   gap: 0.75rem;
@@ -846,7 +931,9 @@ select {
   .hero,
   .dashboardGrid,
   .grid.two,
-  .leadDetail {
+  .leadDetail,
+  .leadDetailBoard,
+  .leadDetailWide {
     grid-template-columns: 1fr;
   }
 
@@ -887,6 +974,7 @@ select {
 
   .statsGrid,
   .scoreGrid,
+  .insightGrid,
   .mockGrid,
   .metaList {
     grid-template-columns: 1fr;

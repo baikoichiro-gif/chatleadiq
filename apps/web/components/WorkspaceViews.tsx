@@ -7,10 +7,38 @@ import { pipelineColumns, sampleLeads } from "../lib/sample";
 import { ConsentWarning, EmptyState, LeadStatusBadge, RiskNote, ScoreBar, StatCard } from "./ui";
 
 type Lead = (typeof sampleLeads)[number] & {
-  analyses?: Array<{ id: number; engine: string; createdAt: string }>;
-  suggestedReplies?: Array<{ id: number; text: string; status: string }>;
-  followUpTasks?: Array<{ id: number; title: string; dueAt: string; status: string }>;
+  analyses?: AnalysisRecord[];
+  suggestedReplies?: Array<{ id: number; text: string; status: string; createdAt?: string }>;
+  followUpTasks?: Array<{ id: number; title: string; description?: string | null; dueAt: string; status: string }>;
   chat?: { messages?: Array<{ id: number; text: string; isFromMe: boolean; timestamp: string }> };
+  interestScore?: number;
+  buyingIntentScore?: number;
+  urgencyScore?: number;
+  budgetFitScore?: number;
+  productMatchScore?: number;
+  sentimentScore?: number;
+  replyPriorityScore?: number;
+  productInterestJson?: string;
+  objectionsJson?: string;
+  decisionStage?: string;
+  summary?: string;
+};
+
+type AnalysisRecord = {
+  id: number;
+  engine: string;
+  inputHash?: string;
+  resultJson?: string;
+  createdAt: string;
+};
+
+type AuditLog = {
+  id: number;
+  action: string;
+  entityType: string;
+  entityId: number;
+  metadataJson?: string;
+  createdAt: string;
 };
 
 export function PipelineView() {
@@ -317,58 +345,224 @@ export function SettingsView() {
 }
 
 export function LeadDetailView({ id }: { id: string }) {
-  const [lead, setLead] = useState<Lead | null>(sampleLeads.find((item) => String(item.id) === id) ?? sampleLeads[0]);
+  const fallbackLead = sampleLeads.find((item) => String(item.id) === id) ?? sampleLeads[0];
+  const [detail, setDetail] = useState<{ lead: Lead | null; auditLogs: AuditLog[] }>({ lead: fallbackLead, auditLogs: [] });
+  const [notice, setNotice] = useState("");
+
   useEffect(() => {
-    apiFetch<{ lead: Lead }>(`/api/leads/${id}`).then((data) => setLead(data.lead)).catch(() => undefined);
+    loadLeadDetail(id)
+      .then(setDetail)
+      .catch(() => undefined);
   }, [id]);
+
+  async function action(path: string, successMessage: string) {
+    setNotice("");
+    await apiFetch(path, { method: "POST" });
+    const next = await loadLeadDetail(id);
+    setDetail(next);
+    setNotice(successMessage);
+  }
+
+  const lead = detail.lead;
   if (!lead) return <EmptyState title="Lead not found" text="No CRM record is available for this lead." />;
+
+  const latestAnalysis = lead.analyses?.[0];
+  const aiResult = parseJson<AiAnalysisResult>(latestAnalysis?.resultJson);
+  const summary = parseJson<LeadSummary>(lead.summary) ?? aiResult?.summary;
+  const detected = aiResult?.detected;
+  const followUpTask = aiResult?.followUpTask;
+  const draft = lead.suggestedReplies?.[0];
+  const activeTask = lead.followUpTasks?.find((task) => task.status === "PENDING") ?? lead.followUpTasks?.[0];
+  const productInterest = parseJson<string[]>(lead.productInterestJson) ?? detected?.products ?? [];
+  const objections = parseJson<string[]>(lead.objectionsJson) ?? detected?.objections ?? [];
   const messages = lead.chat?.messages ?? [
     { id: 1, text: "Bisa kirim invoice hari ini?", isFromMe: false, timestamp: new Date().toISOString() },
     { id: 2, text: "Bisa, saya siapkan draft invoice untuk dicek dulu.", isFromMe: true, timestamp: new Date().toISOString() }
   ];
+
   return (
-    <div className="grid leadDetail">
-      <section className="panel">
-        <div className="sectionHeader">
-          <div>
-            <h2>{getCustomerNumber(lead.contact)}</h2>
-            <p>{getCustomerName(lead.contact) ?? "No saved name"}</p>
+    <div className="stack">
+      <div className="statsGrid">
+        <StatCard label="Overall" value={lead.overallScore} detail="AI lead score" />
+        <StatCard label="Buying Intent" value={lead.buyingIntentScore ?? aiResult?.scores.buyingIntentScore ?? lead.overallScore} tone="green" detail="purchase signal" />
+        <StatCard label="Urgency" value={lead.urgencyScore ?? aiResult?.scores.urgencyScore ?? 0} tone="yellow" detail="timing pressure" />
+        <StatCard label="Spam Risk" value={lead.spamRiskScore} tone={lead.spamRiskScore > 70 ? "red" : "green"} detail="consent guardrail" />
+        <StatCard label="AI Engine" value={latestAnalysis ? "AI" : "Pending"} tone="purple" detail={latestAnalysis ? `${latestAnalysis.engine} · ${formatDate(latestAnalysis.createdAt)}` : "no analysis yet"} />
+      </div>
+
+      <div className="leadDetailBoard">
+        <section className="panel leadOverviewPanel">
+          <div className="sectionHeader">
+            <div>
+              <h2>{getCustomerNumber(lead.contact)}</h2>
+              <p>{getCustomerName(lead.contact) ?? "No saved name"} · {lead.decisionStage ?? "decision stage pending"}</p>
+            </div>
+            <LeadStatusBadge status={lead.status} />
           </div>
-          <LeadStatusBadge status={lead.status} />
-        </div>
-        <div className="scoreGrid">
-          <StatCard label="Overall" value={lead.overallScore} />
-          <StatCard label="Spam Risk" value={lead.spamRiskScore} tone={lead.spamRiskScore > 70 ? "red" : "green"} />
-        </div>
-        <ScoreBar label="Buying intent" value={lead.overallScore} />
-        <ScoreBar label="Reply priority" value={Math.max(0, lead.overallScore - lead.spamRiskScore / 4)} />
-        <div className="buttonRow">
-          <button className="primary">Mark Won</button>
-          <button className="ghost">Mark Lost</button>
-          <button className="danger">Do Not Contact</button>
-        </div>
-      </section>
-      <section className="panel timeline">
-        <h2>Chat Timeline</h2>
-        {messages.map((message) => (
-          <article className={message.isFromMe ? "bubble mine" : "bubble"} key={message.id}>
-            <span>{message.isFromMe ? "Sales" : "Customer"}</span>
-            <p>{message.text}</p>
-            <small>{new Date(message.timestamp).toLocaleString()}</small>
-          </article>
-        ))}
-      </section>
-      <aside className="stack">
-        <section className="panel">
-          <h2>Suggested Reply</h2>
-          <p className="suggested">Baik, saya bantu rangkum opsinya dulu ya. Nanti Bapak/Ibu bisa cek dan kabari kalau sudah cocok.</p>
+          <ScoreBar label="Interest" value={lead.interestScore ?? aiResult?.scores.interestScore ?? 0} />
+          <ScoreBar label="Product match" value={lead.productMatchScore ?? aiResult?.scores.productMatchScore ?? 0} />
+          <ScoreBar label="Reply priority" value={lead.replyPriorityScore ?? aiResult?.scores.replyPriorityScore ?? Math.max(0, lead.overallScore - lead.spamRiskScore / 4)} />
           <div className="buttonRow">
-            <button className="primary">Approve Draft</button>
-            <button className="ghost">Reject</button>
+            <button className="primary" onClick={() => action(`/api/leads/${lead.id}/mark-won`, "Lead marked as won.")}>Mark Won</button>
+            <button className="ghost" onClick={() => action(`/api/leads/${lead.id}/mark-lost`, "Lead marked as lost.")}>Mark Lost</button>
+            <button className="danger" onClick={() => action(`/api/leads/${lead.id}/do-not-contact`, "Lead marked as do-not-contact.")}>Do Not Contact</button>
+          </div>
+          {notice ? <p className="formError">{notice}</p> : null}
+        </section>
+
+        <section className="panel aiSummaryPanel">
+          <h2>AI Summary</h2>
+          <div className="insightGrid">
+            <InsightBlock label="Conversation" value={summary?.shortSummary ?? "No AI summary yet."} />
+            <InsightBlock label="Customer Need" value={summary?.customerNeed ?? "Unknown"} />
+            <InsightBlock label="Opportunity" value={summary?.salesOpportunity ?? lead.nextBestAction} />
+            <InsightBlock label="Risk" value={summary?.risk ?? "No risk summary available."} />
           </div>
         </section>
-        <ConsentWarning />
-      </aside>
+
+        <section className="panel aiSignalsPanel">
+          <h2>AI Signals</h2>
+          <SignalGroup label="Buying signals" values={detected?.buyingSignals ?? []} empty="No buying signal detected." />
+          <SignalGroup label="Objections" values={objections} empty="No objection detected." />
+          <SignalGroup label="Products" values={productInterest} empty="No product extracted." />
+          <SignalGroup label="Time signals" values={detected?.timeSignals ?? []} empty="No timing signal detected." />
+        </section>
+      </div>
+
+      <div className="leadDetailWide">
+        <section className="panel timeline">
+          <div className="sectionHeader">
+            <div>
+              <h2>Chat History</h2>
+              <p>{messages.length} messages used as customer context.</p>
+            </div>
+          </div>
+          {messages.map((message) => (
+            <article className={message.isFromMe ? "bubble mine" : "bubble"} key={message.id}>
+              <span>{message.isFromMe ? "Sales" : "Customer"}</span>
+              <p>{message.text}</p>
+              <small>{formatDate(message.timestamp)}</small>
+            </article>
+          ))}
+        </section>
+
+        <aside className="stack">
+          <section className="panel">
+            <h2>Draft Reply</h2>
+            <p className="suggested">{draft?.text || aiResult?.recommendation.suggestedReply || "No draft reply generated yet."}</p>
+            <div className="followupMeta">
+              <span>{draft?.status ?? "DRAFT"}</span>
+              <span>Human approval required</span>
+            </div>
+          </section>
+
+          <section className="panel">
+            <h2>Follow-up Reason</h2>
+            <div className="followupReason">
+              <strong>{activeTask?.title || followUpTask?.title || lead.nextBestAction}</strong>
+              <p>{activeTask?.description || followUpTask?.reason || aiResult?.recommendation.reason || "No follow-up reason available."}</p>
+              <small>{activeTask?.dueAt ? `Due ${formatDate(activeTask.dueAt)}` : followUpTask?.dueAtIso ? `AI proposed ${formatDate(followUpTask.dueAtIso)}` : "No due date"}</small>
+            </div>
+          </section>
+
+          <section className="panel">
+            <h2>AI Audit Trail</h2>
+            <div className="auditList">
+              {(lead.analyses ?? []).map((analysis) => (
+                <article className="auditItem" key={analysis.id}>
+                  <strong>{analysis.engine}</strong>
+                  <span>{formatDate(analysis.createdAt)}</span>
+                  {analysis.inputHash ? <small>input {analysis.inputHash.slice(0, 12)}</small> : null}
+                </article>
+              ))}
+              {detail.auditLogs.map((log) => (
+                <article className="auditItem" key={`audit-${log.id}`}>
+                  <strong>{log.action.replaceAll("_", " ")}</strong>
+                  <span>{formatDate(log.createdAt)}</span>
+                </article>
+              ))}
+              {!lead.analyses?.length && !detail.auditLogs.length ? <EmptyState title="No audit yet" text="Run analysis to create an AI audit trail." /> : null}
+            </div>
+          </section>
+
+          <ConsentWarning />
+        </aside>
+      </div>
     </div>
   );
+}
+
+type LeadSummary = {
+  shortSummary: string;
+  customerNeed: string;
+  salesOpportunity: string;
+  risk: string;
+};
+
+type AiAnalysisResult = {
+  scores: {
+    interestScore: number;
+    buyingIntentScore: number;
+    urgencyScore: number;
+    productMatchScore: number;
+    replyPriorityScore: number;
+  };
+  detected: {
+    products: string[];
+    timeSignals: string[];
+    objections: string[];
+    buyingSignals: string[];
+  };
+  recommendation: {
+    reason: string;
+    suggestedReply: string;
+  };
+  followUpTask?: {
+    title: string;
+    reason: string;
+    dueAtIso: string | null;
+  };
+  summary: LeadSummary;
+};
+
+function InsightBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="insightBlock">
+      <span>{label}</span>
+      <p>{value}</p>
+    </div>
+  );
+}
+
+function SignalGroup({ label, values, empty }: { label: string; values: string[]; empty: string }) {
+  return (
+    <div className="signalGroup">
+      <span>{label}</span>
+      <div>
+        {values.length ? values.map((value) => <small key={value}>{value}</small>) : <em>{empty}</em>}
+      </div>
+    </div>
+  );
+}
+
+function loadLeadDetail(id: string) {
+  return apiFetch<{ lead: Lead; auditLogs: AuditLog[] }>(`/api/leads/${id}`);
+}
+
+function parseJson<T>(value?: string | null): T | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
